@@ -26,7 +26,7 @@
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.28.1/mapbox-gl.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <style>
   :root{
@@ -48,9 +48,37 @@
     --font-mono:'Pixelify Sans', 'Courier New', monospace;
     --font-sans:'Pixelify Sans', system-ui, -apple-system, sans-serif;
   }
+
+  /* Dark mode: invert dark/light tokens (hard-shadow and most borders/text
+     ride on var(--ink), so they flip for free). Brand green is untouched —
+     only the Mapbox map itself goes grayscale, handled in JS. */
+  :root[data-mode="dark"]{
+    --bg:#0c0c0c;
+    --ink:#ffffff;
+    --ink-soft:#b7bcb4;
+    --card-bg:#141714;
+    --card-border:#2a2f2a;
+    --chip-fg:#0c0c0c;
+  }
+
+  /* Non-conceptual mode: swap the pixel-font system for a plain, readable one. */
+  :root[data-mode="plain"]{
+    --font-display:'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono:'Inter', system-ui, -apple-system, sans-serif;
+    --font-sans:'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* --green-700/800 are dark greens tuned for white cards — swap them for a
+     lighter green in dark mode so this text stays readable on dark cards. */
+  :root[data-mode="dark"] .badge,
+  :root[data-mode="dark"] .park-card-meta span{ color:#8fe6ac; }
+  :root[data-mode="dark"] .category,
+  :root[data-mode="dark"] .park-list-eyebrow,
+  :root[data-mode="dark"] .park-card-category{ color:#5fd486; }
+
   *{box-sizing:border-box;}
   button{font-family:inherit;} /* buttons don't inherit page font by default in browser UA styles */
-  html,body{margin:0;padding:0;height:100%;font-family:var(--font-sans);color:var(--ink);}
+  html,body{margin:0;padding:0;height:100%;font-family:var(--font-sans);color:var(--ink);background:var(--bg);}
   #map{position:absolute;inset:0;}
 
   @media (hover:hover) and (pointer:fine){
@@ -79,7 +107,7 @@
     z-index:-1;pointer-events:none;
   }
   .logo{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
-  .logo-mark{width:26px;height:26px;border:2.5px solid var(--green-600);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:#fff;}
+  .logo-mark{width:26px;height:26px;border:2.5px solid var(--green-600);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--card-bg);}
   .logo-word{font-family:var(--font-display);font-weight:500;font-size:15px;line-height:1.1;letter-spacing:0;color:#fff;}
   .logo-word span{display:block;font-family:var(--font-mono);font-weight:400;font-size:9px;letter-spacing:.1em;color:rgba(255,255,255,.7);margin-top:3px;}
   .navlinks{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 auto;}
@@ -92,11 +120,31 @@
   .navlink:hover{border-color:var(--ink);}
   .navlink.active{background:var(--green-600);color:#fff;border-color:var(--ink);box-shadow:var(--hard-shadow-sm);}
 
+  /* live design-mode toggle: conceptual (default) / dark / plain (non-conceptual) */
+  .mode-toggle{
+    display:flex;gap:2px;flex:0 0 auto;
+    background:rgba(255,255,255,.85);border:1.5px solid var(--card-border);
+    border-radius:999px;padding:3px;
+  }
+  .mode-btn{
+    font-family:var(--font-sans);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    padding:6px 12px;border-radius:999px;border:none;background:transparent;
+    color:var(--ink-soft);cursor:pointer;white-space:nowrap;
+    transition:background .15s ease, color .15s ease;
+  }
+  .mode-btn.active{background:var(--green-600);color:#fff;}
+
+  /* split view: existing info card (2fr) next to a new map card (3fr) */
+  .split{
+    position:absolute;z-index:5;
+    top:78px;left:18px;right:18px;bottom:54px;
+    display:flex;gap:18px;
+  }
+  @media (max-width:760px){ .split{flex-direction:column;} }
+
   .panel{
-    position:absolute;left:18px;top:78px;z-index:10;
-    width:320px;max-width:calc(100vw - 36px);
-    max-height:calc(100% - 132px);
-    overflow-y:auto;
+    flex:2 1 0;min-width:0;
+    height:100%;overflow-y:auto;
     background:var(--card-bg);
     border:2px solid var(--ink);
     border-radius:4px;
@@ -104,11 +152,17 @@
     padding:16px;
   }
   .panel.closed{display:none;}
+
+  .map-card{
+    flex:3 1 0;min-width:0;height:100%;position:relative;
+    background:var(--card-bg);border:2px solid var(--ink);border-radius:4px;
+    box-shadow:var(--hard-shadow);overflow:hidden;
+  }
   @keyframes cardIn{ from{opacity:0; transform:translateY(16px) scale(.97);} to{opacity:1; transform:translateY(0) scale(1);} }
   .panel.card-in{animation:cardIn .45s cubic-bezier(.16,1,.3,1);}
   .reopen-btn{
     position:absolute;left:18px;top:78px;z-index:10;
-    background:#fff;border:2px solid var(--ink);border-radius:4px;
+    background:var(--card-bg);border:2px solid var(--ink);border-radius:4px;
     padding:9px 16px;font-size:12px;font-weight:700;display:none;align-items:center;gap:6px;
     box-shadow:var(--hard-shadow-sm);cursor:pointer;
     transition:transform .15s cubic-bezier(.16,1,.3,1);
@@ -167,7 +221,7 @@
   }
 
   .token-warning{
-    position:absolute;inset:0;z-index:50;background:#f4f1e9;
+    position:absolute;inset:0;z-index:50;background:var(--bg);
     display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;
   }
   .token-warning .box{max-width:440px;}
@@ -175,7 +229,7 @@
   .token-warning code{background:#eae5d6;padding:2px 6px;border-radius:5px;}
 
   /* the interactive map is "page 1" — everything below is normal document flow you scroll to */
-  #mapStage{position:relative;height:100vh;overflow:hidden;}
+  #mapStage{position:relative;height:100vh;overflow:hidden;background:var(--card-bg);}
 
   /* Pure-CSS parallax hero (Keith Clark technique): perspective:1px on the
      scroll container + translateZ(-1px) scale(2) on the background layer
@@ -200,10 +254,35 @@
     font-size:clamp(24px, 7vw, 100px);line-height:1.05;
     letter-spacing:0;margin:0;padding:0 16px;
   }
-  .ContentContainer{position:relative;display:block;background-color:#fff;z-index:1;}
+  .ContentContainer{position:relative;display:block;background-color:var(--card-bg);z-index:1;}
   .Content{max-width:750px;margin:0 auto;padding:75px 24px;font-family:var(--font-sans);font-size:18px;line-height:28px;color:var(--ink);}
   .Content p{margin:0 0 24px;}
   .Content p:last-child{margin-bottom:0;}
+
+  /* Park list: scrolls in below the map, one card per PARKS entry. */
+  .park-list{background:var(--card-bg);padding:72px 24px 96px;}
+  .park-list-inner{max-width:1080px;margin:0 auto;}
+  .park-list-head{margin-bottom:32px;max-width:560px;}
+  .park-list-eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--green-700);display:block;margin-bottom:8px;}
+  .park-list-heading{font-family:var(--font-display);font-weight:500;font-size:clamp(24px,4.5vw,34px);line-height:1.1;margin:0 0 10px;color:var(--ink);}
+  .park-list-sub{font-family:var(--font-sans);color:var(--ink-soft);font-size:14px;line-height:1.6;margin:0;}
+
+  .park-list-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:18px;}
+  .park-card{
+    text-align:left;cursor:pointer;font-family:var(--font-sans);
+    background:var(--card-bg);border:2px solid var(--ink);border-radius:4px;box-shadow:var(--hard-shadow-sm);
+    padding:16px;display:flex;flex-direction:column;gap:8px;
+    transition:transform .15s cubic-bezier(.16,1,.3,1), box-shadow .15s ease;
+  }
+  .park-card:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 0 var(--ink);}
+  .park-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .park-card-unit{font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);letter-spacing:.04em;}
+  .park-card h3{font-family:var(--font-display);font-weight:500;font-size:18px;line-height:1.15;margin:0;}
+  .park-card-category{font-size:11px;font-weight:700;color:var(--green-700);text-transform:uppercase;letter-spacing:.06em;}
+  .park-card-note{font-size:12.5px;line-height:1.55;color:var(--ink-soft);margin:0;flex:1;}
+  .park-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+  .park-card-meta span{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:4px;border:1.5px solid var(--ink);background:rgba(42,140,74,.1);color:var(--green-800);}
+  .park-card-meta span.warn{background:rgba(194,84,44,.12);color:var(--warn);}
 </style>
 </head>
 <body>
@@ -231,8 +310,6 @@
     </div>
   </div>
 
-  <div id="map"></div>
-
   <div id="pawCursor">🐾</div>
 
   <nav>
@@ -241,13 +318,36 @@
       <div class="logo-word">PAWS DC<span>FIELD LOG · DISTRICT PARKS</span></div>
     </div>
     <div class="navlinks" id="navlinks"></div>
+    <div class="mode-toggle" id="modeToggle" role="group" aria-label="Design mode">
+      <button type="button" class="mode-btn" data-mode="conceptual">Concept</button>
+      <button type="button" class="mode-btn" data-mode="dark">Dark</button>
+      <button type="button" class="mode-btn" data-mode="plain">Plain</button>
+    </div>
   </nav>
 
+  <div class="split">
+    <div class="panel" id="panel"></div>
+    <div class="map-card"><div id="map"></div></div>
+  </div>
+
   <button class="reopen-btn" id="reopenBtn">☰ Show park info</button>
-  <div class="panel" id="panel"></div>
 
   <div class="marquee"><div class="marquee-track" id="marqueeTrack"></div></div>
 </div>
+
+<!-- Scroll section 3: full park directory. Cards are rendered from PARKS in
+     the script below — add more fields to the data and they'll show up here
+     without touching this markup. -->
+<section class="park-list" id="parkList">
+  <div class="park-list-inner">
+    <div class="park-list-head">
+      <span class="park-list-eyebrow">FULL FIELD LOG</span>
+      <h2 class="park-list-heading">All seven parks, logged.</h2>
+      <p class="park-list-sub">Tap a card to jump to it on the map above.</p>
+    </div>
+    <div class="park-list-grid" id="parkListGrid"></div>
+  </div>
+</section>
 
 <script>
 const PARKS = [
@@ -351,7 +451,7 @@ if(FINE_POINTER){
     pawCursor.classList.add('show');
   });
   document.addEventListener('mouseleave', ()=> pawCursor.classList.remove('show'));
-  const MAGNET_SELECTOR = '.navlink, .action-btn, .icon-btn, .reopen-btn, .park-marker';
+  const MAGNET_SELECTOR = '.navlink, .action-btn, .icon-btn, .reopen-btn, .park-marker, .mode-btn, .park-card';
   document.addEventListener('mouseover', (e)=>{ if(e.target.closest(MAGNET_SELECTOR)) pawCursor.classList.add('big'); });
   document.addEventListener('mouseout', (e)=>{ if(e.target.closest(MAGNET_SELECTOR)) pawCursor.classList.remove('big'); });
 }
@@ -367,6 +467,28 @@ function attachMagnetic(el, strength, max){
   el.addEventListener('mouseleave', ()=>{ el.style.transform = ''; });
 }
 
+/* ---- design mode (conceptual / dark / plain), live-toggleable ---- */
+const MODE_PALETTES = {
+  // black/white/green — the site's normal palette
+  conceptual: {
+    ink:'#17201b', paper:'#f2f2f2', green:'#2a8c4a',
+    font:'Roboto Mono', lightPreset:'day'
+  },
+  // pure grayscale: green (greenspace) desaturates to a mid-dark gray, kept
+  // clearly distinct from both the black land fill and the white roads so
+  // highways and tree cover never read as the same tone.
+  dark: {
+    ink:'#ffffff', paper:'#0c0c0c', green:'#3a3a3a',
+    font:'Roboto Mono', lightPreset:'night'
+  }
+  // 'plain' has no palette — it skips every color/font override below and
+  // just shows Mapbox Standard's own default styling.
+};
+
+let currentMode = 'conceptual';
+try{ currentMode = localStorage.getItem('paws-dc-mode') || 'conceptual'; }catch(e){}
+document.documentElement.dataset.mode = currentMode;
+
 const map = new mapboxgl.Map({
   container: 'map',
   style: 'mapbox://styles/mapbox/standard', // Standard style ships with 3D buildings + landmarks built in
@@ -380,41 +502,42 @@ const map = new mapboxgl.Map({
 map.addControl(new mapboxgl.NavigationControl({visualizePitch:true}), 'top-right');
 
 map.on('style.load', () => {
-  // Force a daytime light preset + make sure 3D buildings/landmarks are shown
+  // Force a light preset + make sure 3D buildings/landmarks are shown
   try{
-    map.setConfigProperty('basemap', 'lightPreset', 'day');
+    map.setConfigProperty('basemap', 'lightPreset', currentMode==='dark' ? 'night' : 'day');
     map.setConfigProperty('basemap', 'show3dObjects', true);
   }catch(e){ /* older mapbox-gl-js without Standard config API */ }
 
-  // 3-color basemap: black/white/green only, to match the site's palette.
+  // 'plain' mode: leave Mapbox Standard completely untouched (its own colors/font).
   // Mapbox's vector-tile label font can't be an arbitrary Google Font (Pixelify Sans isn't
-  // hosted by Mapbox) — Roboto Mono is the closest built-in monospace match.
-  try{
-    // PAPER = white with a 5% black overlay (255 * 0.95 ≈ 242 → #f2f2f2), so the map's
-    // "white" land/building areas read slightly muted instead of stark white.
-    const INK = '#17201b', PAPER = '#f2f2f2', GREEN = '#2a8c4a';
-    // 'monochrome' applies its own desaturation filter that mutes/ignores the
-    // colorLand / colorBuildings / colorGreenspace overrides below — 'default'
-    // lets those explicit hex overrides actually show up as pure black/white/green.
-    map.setConfigProperty('basemap', 'theme', 'default');
-    map.setConfigProperty('basemap', 'font', 'Roboto Mono');
-    map.setConfigProperty('basemap', 'colorGreenspace', GREEN);
-    map.setConfigProperty('basemap', 'colorLand', PAPER);
-    map.setConfigProperty('basemap', 'colorCommercial', PAPER);
-    map.setConfigProperty('basemap', 'colorEducation', PAPER);
-    map.setConfigProperty('basemap', 'colorMedical', PAPER);
-    map.setConfigProperty('basemap', 'colorIndustrial', PAPER);
-    map.setConfigProperty('basemap', 'colorBuildings', PAPER);
-    map.setConfigProperty('basemap', 'colorWater', INK);
-    map.setConfigProperty('basemap', 'colorMotorways', INK);
-    map.setConfigProperty('basemap', 'colorTrunks', INK);
-    map.setConfigProperty('basemap', 'colorRoads', INK);
-    map.setConfigProperty('basemap', 'colorHdRoads', INK);
-    map.setConfigProperty('basemap', 'colorAdminBoundaries', INK);
-    map.setConfigProperty('basemap', 'colorPlaceLabels', INK);
-    map.setConfigProperty('basemap', 'colorRoadLabels', INK);
-    map.setConfigProperty('basemap', 'colorPointOfInterestLabels', INK);
-  }catch(e){ /* older mapbox-gl-js without Standard color-theming config */ }
+  // hosted by Mapbox) — Roboto Mono is the closest built-in monospace match for the other modes.
+  if(currentMode !== 'plain'){
+    try{
+      const pal = MODE_PALETTES[currentMode];
+      const INK = pal.ink, PAPER = pal.paper, GREEN = pal.green;
+      // 'monochrome' theme applies its own desaturation filter that mutes/ignores the
+      // colorLand / colorBuildings / colorGreenspace overrides below — 'default'
+      // lets those explicit hex overrides actually show up as pure black/white/green(/gray).
+      map.setConfigProperty('basemap', 'theme', 'default');
+      map.setConfigProperty('basemap', 'font', pal.font);
+      map.setConfigProperty('basemap', 'colorGreenspace', GREEN);
+      map.setConfigProperty('basemap', 'colorLand', PAPER);
+      map.setConfigProperty('basemap', 'colorCommercial', PAPER);
+      map.setConfigProperty('basemap', 'colorEducation', PAPER);
+      map.setConfigProperty('basemap', 'colorMedical', PAPER);
+      map.setConfigProperty('basemap', 'colorIndustrial', PAPER);
+      map.setConfigProperty('basemap', 'colorBuildings', PAPER);
+      map.setConfigProperty('basemap', 'colorWater', INK);
+      map.setConfigProperty('basemap', 'colorMotorways', INK);
+      map.setConfigProperty('basemap', 'colorTrunks', INK);
+      map.setConfigProperty('basemap', 'colorRoads', INK);
+      map.setConfigProperty('basemap', 'colorHdRoads', INK);
+      map.setConfigProperty('basemap', 'colorAdminBoundaries', INK);
+      map.setConfigProperty('basemap', 'colorPlaceLabels', INK);
+      map.setConfigProperty('basemap', 'colorRoadLabels', INK);
+      map.setConfigProperty('basemap', 'colorPointOfInterestLabels', INK);
+    }catch(e){ /* older mapbox-gl-js without Standard color-theming config */ }
+  }
 
   // 3D terrain: real elevation (hills/valleys), not just building extrusions
   if(!map.getSource('mapbox-dem')){
@@ -464,6 +587,22 @@ map.on('style.load', () => {
       }
     });
   }
+});
+
+/* mode toggle: switching modes reloads the Standard style with {diff:false}
+   so previously-set colorX config from another mode doesn't linger. */
+function setMode(mode){
+  if(mode === currentMode) return;
+  currentMode = mode;
+  document.documentElement.dataset.mode = mode;
+  try{ localStorage.setItem('paws-dc-mode', mode); }catch(e){}
+  document.querySelectorAll('.mode-btn').forEach(b=> b.classList.toggle('active', b.dataset.mode===mode));
+  map.setStyle('mapbox://styles/mapbox/standard', {diff:false});
+}
+document.querySelectorAll('.mode-btn').forEach(b=>{
+  b.classList.toggle('active', b.dataset.mode===currentMode);
+  b.addEventListener('click', ()=> setMode(b.dataset.mode));
+  attachMagnetic(b, .2, 5);
 });
 
 const markerRefs = {};
@@ -586,6 +725,39 @@ function closePanel(){ panel.classList.add("closed"); reopenBtn.classList.add("s
 reopenBtn.addEventListener("click", ()=>{ if(currentId) selectPark(currentId); });
 
 selectPark("RC-01");
+
+/* Park list section: one card per PARKS entry, click -> open it on the map above. */
+(function(){
+  const grid = document.getElementById('parkListGrid');
+  if(!grid) return;
+  grid.innerHTML = PARKS.map(p=>{
+    const offGood = p.offleash.startsWith("Yes");
+    const waterWarn = p.water.startsWith("None");
+    return `
+      <button class="park-card" type="button" data-id="${p.id}">
+        <div class="park-card-top">
+          <span class="park-card-unit">UNIT ${p.id}</span>
+        </div>
+        <h3>${p.name}</h3>
+        <div class="park-card-category">${p.category}</div>
+        <p class="park-card-note">${p.note}</p>
+        <div class="park-card-meta">
+          <span>⏱ ${p.loop}</span>
+          <span class="${offGood?'':'warn'}">${offGood?'Off-leash OK':'Leash required'}</span>
+          <span class="${waterWarn?'warn':''}">${waterWarn?'No water':'Water on site'}</span>
+        </div>
+      </button>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.park-card').forEach(card=>{
+    attachMagnetic(card, .12, 4);
+    card.addEventListener('click', ()=>{
+      selectPark(card.dataset.id);
+      document.getElementById('mapStage').scrollIntoView({behavior:'smooth'});
+    });
+  });
+})();
 </script>
 </body>
 </html>
