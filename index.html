@@ -76,8 +76,15 @@
   :root[data-mode="dark"] .park-list-eyebrow,
   :root[data-mode="dark"] .park-card-category{ color:#5fd486; }
 
+  /* .navlink/.mode-btn's pill background is a deliberate fixed near-white
+     (see "Deliberate exceptions" in tokens.md) — it doesn't flip in dark
+     mode, so var(--ink-soft)'s dark-mode (light) value washes out against
+     it. Force a fixed dark color here instead of letting it inherit. */
+  :root[data-mode="dark"] .navlink,
+  :root[data-mode="dark"] .mode-btn{ color:#33362f; }
+
   *{box-sizing:border-box;}
-  button{font-family:inherit;} /* buttons don't inherit page font by default in browser UA styles */
+  button{font-family:inherit;color:inherit;} /* buttons don't inherit page font/color by default in browser UA styles */
   html,body{margin:0;padding:0;height:100%;font-family:var(--font-sans);color:var(--ink);background:var(--bg);}
   #map{position:absolute;inset:0;}
 
@@ -181,6 +188,8 @@
     letter-spacing:0;
   }
   .category{font-size:11px;font-weight:700;color:var(--green-700);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;}
+  .nps-link{font-weight:700;color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px;}
+  .nps-link:hover{color:var(--ink);}
   .action-row{display:flex;justify-content:space-between;gap:4px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--card-border);}
   .action-btn{display:flex;flex-direction:column;align-items:center;gap:5px;background:none;border:none;cursor:pointer;color:var(--ink-soft);flex:1 1 0;}
   .action-btn .circle{width:36px;height:36px;border-radius:50%;background:var(--green-600);color:#fff;border:2px solid var(--ink);box-shadow:var(--hard-shadow-sm);display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .15s cubic-bezier(.16,1,.3,1);}
@@ -277,6 +286,8 @@
   .park-card:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 0 var(--ink);}
   .park-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
   .park-card-unit{font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);letter-spacing:.04em;}
+  .park-card-nps-tag{font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--green-700);border:1px solid var(--green-700);border-radius:3px;padding:1px 5px;}
+  :root[data-mode="dark"] .park-card-nps-tag{color:#5fd486;border-color:#5fd486;}
   .park-card h3{font-family:var(--font-display);font-weight:500;font-size:18px;line-height:1.15;margin:0;}
   .park-card-category{font-size:11px;font-weight:700;color:var(--green-700);text-transform:uppercase;letter-spacing:.06em;}
   .park-card-note{font-size:12.5px;line-height:1.55;color:var(--ink-soft);margin:0;flex:1;}
@@ -354,6 +365,7 @@ const PARKS = [
   {
     id:"RC-01", lng:-77.045, lat:38.955, kind:"park",
     name:"Rock Creek Park — Western Ridge Trail", category:"Forest trail",
+    source:"https://www.nps.gov/rocr/index.htm",
     tags:["wooded","stairs"],
     loop:"~50 min", surface:"Dirt / gravel, partly paved", shade:"Very heavy (full forest)",
     stairs:"Some grades / steps on side trails", water:"Only near the Nature Center — none on the trail",
@@ -363,6 +375,7 @@ const PARKS = [
   {
     id:"GA-02", lng:-77.0777, lat:38.9435, kind:"park",
     name:"Glover-Archbold Park", category:"Forest trail",
+    source:"https://www.nps.gov/places/glover-archbold-park.htm",
     tags:["wooded"],
     loop:"~45 min", surface:"Dirt trail, unpaved", shade:"Very heavy (dense forest path)",
     stairs:"Some grade/steps at trailhead entrances", water:"None",
@@ -372,6 +385,7 @@ const PARKS = [
   {
     id:"MT-03", lng:-77.0611, lat:38.9138, kind:"park",
     name:"Montrose Park", category:"Lawn & garden",
+    source:"https://www.nps.gov/places/montrose-park.htm",
     tags:["offleash","shade"],
     loop:"~30 min", surface:"Grass + paved paths", shade:"Plenty, lots of benches",
     stairs:"Almost none (flat)", water:"None — bring your own",
@@ -381,6 +395,7 @@ const PARKS = [
   {
     id:"GW-04", lng:-77.0625, lat:38.9034, kind:"park",
     name:"Georgetown Waterfront Park", category:"Riverfront path",
+    source:"https://www.nps.gov/places/georgetown-waterfront-park.htm",
     tags:["paved","water"],
     loop:"~40 min (riverside out-and-back)", surface:"Fully paved, flat", shade:"Light (mostly open riverfront)",
     stairs:"None (fully flat)", water:"Yes (fountain on-site)",
@@ -390,6 +405,7 @@ const PARKS = [
   {
     id:"MH-05", lng:-77.0367, lat:38.9210, kind:"park",
     name:"Meridian Hill Park (Malcolm X Park)", category:"Terraced park",
+    source:"https://www.nps.gov/places/meridian-hill-park.htm",
     tags:["stairs","water"],
     loop:"~25 min", surface:"Paved + grass terrace on top", shade:"Moderate (terraces exposed, upper lawn shaded)",
     stairs:"Many — cascading fountain stairs", water:"Yes",
@@ -664,7 +680,7 @@ function renderPanel(p){
     <div class="panel-topbar"><button class="icon-btn" id="closePanel">✕</button></div>
     <div class="unit-tag">UNIT ${p.id} / DC-PARKS-NET</div>
     <h2>${p.name}</h2>
-    <div class="category">${p.category}</div>
+    <div class="category">${p.category}${p.source ? ` · <a class="nps-link" href="${p.source}" target="_blank" rel="noopener">NPS official page ↗</a>` : ''}</div>
     <div class="action-row">
       <button class="action-btn" id="btnDirections"><span class="circle">🧭</span><span class="label">Directions</span></button>
       <button class="action-btn ${isSaved?'saved':''}" id="btnSave"><span class="circle">${isSaved?'♥':'♡'}</span><span class="label">${isSaved?'Saved':'Save'}</span></button>
@@ -737,6 +753,7 @@ selectPark("RC-01");
       <button class="park-card" type="button" data-id="${p.id}">
         <div class="park-card-top">
           <span class="park-card-unit">UNIT ${p.id}</span>
+          ${p.source ? '<span class="park-card-nps-tag">NPS</span>' : ''}
         </div>
         <h3>${p.name}</h3>
         <div class="park-card-category">${p.category}</div>
