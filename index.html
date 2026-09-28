@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PAWS DC // 3D Building Map (Mapbox)</title>
+
+<!--
+  ============================================================
+  SETUP — read before opening
+  ============================================================
+  1. Get a free Mapbox access token: https://account.mapbox.com/
+     (Sign up → Tokens → copy your "Default public token", or
+     create a new public token scoped to styles:read + fonts:read
+     + tiles:read.)
+  2. Paste it below where it says  YOUR_MAPBOX_ACCESS_TOKEN .
+  3. Open this file directly in a browser, or host it on any
+     static host (GitHub Pages, Netlify, Vercel, your own server).
+     It will NOT work if pasted into claude.ai as a published
+     artifact — Claude's hosted-artifact sandbox blocks outbound
+     requests to api.mapbox.com, so the map tiles can't load there.
+  ============================================================
+-->
+
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.28.1/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.28.1/mapbox-gl.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#f4f1e9;
+    --ink:#17201b;
+    --ink-soft:#5c6459;
+    --green-600:#2a8c4a;
+    --green-700:#1f6d3c;
+    --green-800:#16532f;
+    --card-bg:#ffffff;
+    --card-border:#e7e2d4;
+    --chip-bg:#17201b;
+    --chip-fg:#f4f1e9;
+    --warn:#c2542c;
+    --hard-shadow:5px 5px 0 0 var(--ink);
+    --hard-shadow-sm:3px 3px 0 0 var(--ink);
+    /* Type system: every role now shares the Pixelify Sans pixel font, sized/weighted per role */
+    --font-display:'Pixelify Sans', monospace;
+    --font-mono:'Pixelify Sans', 'Courier New', monospace;
+    --font-sans:'Pixelify Sans', system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  button{font-family:inherit;} /* buttons don't inherit page font by default in browser UA styles */
+  html,body{margin:0;padding:0;height:100%;font-family:var(--font-sans);color:var(--ink);}
+  #map{position:absolute;inset:0;}
+
+  @media (hover:hover) and (pointer:fine){
+    body.custom-cursor-on, body.custom-cursor-on *{cursor:none !important;}
+  }
+  #pawCursor{
+    position:fixed;top:0;left:0;z-index:9999;pointer-events:none;
+    font-size:18px;line-height:1;opacity:0;
+    transform:translate(-50%,-50%) rotate(-20deg);
+    transition:transform .12s cubic-bezier(.16,1,.3,1), opacity .15s ease;
+  }
+  #pawCursor.show{opacity:1;}
+  #pawCursor.big{transform:translate(-50%,-50%) rotate(-20deg) scale(1.5);}
+
+  nav{
+    position:absolute;top:0;left:0;right:0;z-index:10;
+    display:flex;align-items:center;gap:18px;
+    padding:14px 20px;
+    background:transparent;
+    flex-wrap:wrap;
+  }
+  nav::before{
+    content:'';
+    position:absolute;top:0;left:0;right:0;height:140px;
+    background:linear-gradient(to bottom, rgba(0,0,0,.5), rgba(0,0,0,0));
+    z-index:-1;pointer-events:none;
+  }
+  .logo{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
+  .logo-mark{width:26px;height:26px;border:2.5px solid var(--green-600);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;background:#fff;}
+  .logo-word{font-family:var(--font-display);font-weight:500;font-size:15px;line-height:1.1;letter-spacing:0;color:#fff;}
+  .logo-word span{display:block;font-family:var(--font-mono);font-weight:400;font-size:9px;letter-spacing:.1em;color:rgba(255,255,255,.7);margin-top:3px;}
+  .navlinks{display:flex;gap:8px;flex-wrap:wrap;flex:1 1 auto;}
+  .navlink{
+    font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    padding:8px 16px;border-radius:999px;background:rgba(255,255,255,.85);border:1.5px solid var(--card-border);
+    color:var(--ink-soft);cursor:pointer;white-space:nowrap;
+    transition:transform .15s cubic-bezier(.16,1,.3,1), border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+  }
+  .navlink:hover{border-color:var(--ink);}
+  .navlink.active{background:var(--green-600);color:#fff;border-color:var(--ink);box-shadow:var(--hard-shadow-sm);}
+
+  .panel{
+    position:absolute;left:18px;top:78px;z-index:10;
+    width:320px;max-width:calc(100vw - 36px);
+    max-height:calc(100% - 132px);
+    overflow-y:auto;
+    background:var(--card-bg);
+    border:2px solid var(--ink);
+    border-radius:4px;
+    box-shadow:var(--hard-shadow);
+    padding:16px;
+  }
+  .panel.closed{display:none;}
+  @keyframes cardIn{ from{opacity:0; transform:translateY(16px) scale(.97);} to{opacity:1; transform:translateY(0) scale(1);} }
+  .panel.card-in{animation:cardIn .45s cubic-bezier(.16,1,.3,1);}
+  .reopen-btn{
+    position:absolute;left:18px;top:78px;z-index:10;
+    background:#fff;border:2px solid var(--ink);border-radius:4px;
+    padding:9px 16px;font-size:12px;font-weight:700;display:none;align-items:center;gap:6px;
+    box-shadow:var(--hard-shadow-sm);cursor:pointer;
+    transition:transform .15s cubic-bezier(.16,1,.3,1);
+  }
+  .reopen-btn.show{display:inline-flex;}
+  .panel-topbar{display:flex;justify-content:flex-end;margin-bottom:4px;}
+  .icon-btn{width:28px;height:28px;border-radius:4px;border:1.5px solid var(--ink);background:transparent;cursor:pointer;color:var(--ink-soft);transition:transform .15s cubic-bezier(.16,1,.3,1);}
+
+  .unit-tag{font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);letter-spacing:.04em;}
+  .panel h2{
+    font-family:var(--font-display);
+    margin:4px 0 6px;
+    font-size:clamp(24px, 6.5vw, 32px);
+    font-weight:500;
+    line-height:1.05;
+    letter-spacing:0;
+  }
+  .category{font-size:11px;font-weight:700;color:var(--green-700);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;}
+  .action-row{display:flex;justify-content:space-between;gap:4px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--card-border);}
+  .action-btn{display:flex;flex-direction:column;align-items:center;gap:5px;background:none;border:none;cursor:pointer;color:var(--ink-soft);flex:1 1 0;}
+  .action-btn .circle{width:36px;height:36px;border-radius:50%;background:var(--green-600);color:#fff;border:2px solid var(--ink);box-shadow:var(--hard-shadow-sm);display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .15s cubic-bezier(.16,1,.3,1);}
+  .action-btn.saved .circle{background:var(--warn);}
+  .action-btn span.label{font-size:9px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
+
+  .section{margin-bottom:14px;}
+  .section-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:700;margin-bottom:4px;}
+  .section-title .ico{width:20px;height:20px;border-radius:4px;border:1.5px solid var(--ink);background:rgba(42,140,74,.14);display:flex;align-items:center;justify-content:center;font-size:11px;}
+  .section p{margin:0;font-size:12.5px;line-height:1.55;color:var(--ink-soft);}
+  .badge-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .badge{font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:4px;border:1.5px solid var(--ink);background:rgba(42,140,74,.12);color:var(--green-800);}
+  .badge.warn{background:rgba(194,84,44,.14);color:var(--warn);}
+  .foot-note{font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);opacity:.75;margin-top:8px;line-height:1.6;}
+
+  .park-marker{width:30px;height:30px;border-radius:50% 50% 50% 0;background:var(--green-600);border:2px solid var(--ink);transform:rotate(-45deg);box-shadow:2px 2px 0 0 var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity .25s ease, transform .25s cubic-bezier(.16,1,.3,1);}
+  .park-marker.turf{background:#3d9e82;}
+  .park-marker span{transform:rotate(45deg);font-size:13px;}
+  .park-marker.selected{outline:3px solid var(--ink);outline-offset:2px;}
+
+  .mapboxgl-popup-content{border-radius:4px;font-family:var(--font-sans);padding:10px 12px;}
+  .mapboxgl-ctrl-top-right{margin-top:66px;}
+
+  .marquee{
+    position:absolute;left:0;right:0;bottom:0;z-index:10;overflow:hidden;
+    background:var(--ink);color:var(--chip-fg);padding:6px 0;border-top:2px solid var(--ink);
+  }
+  .marquee-track{display:inline-flex;white-space:nowrap;will-change:transform;
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    animation:marquee 24s linear infinite;
+  }
+  .marquee-track span{padding:0 22px;opacity:.85;}
+  .marquee-track span:nth-child(4n+1){opacity:1;color:#9fe0b6;}
+  @keyframes marquee{ from{transform:translateX(0);} to{transform:translateX(-50%);} }
+  @media (prefers-reduced-motion: reduce){
+    .marquee-track{animation:none;}
+    #pawCursor{display:none;}
+  }
+
+  .token-warning{
+    position:absolute;inset:0;z-index:50;background:#f4f1e9;
+    display:flex;align-items:center;justify-content:center;text-align:center;padding:40px;
+  }
+  .token-warning .box{max-width:440px;}
+  .token-warning h2{font-family:var(--font-display);font-size:clamp(20px,4.5vw,26px);line-height:1.15;letter-spacing:0;font-weight:500;}
+  .token-warning code{background:#eae5d6;padding:2px 6px;border-radius:5px;}
+
+  /* the interactive map is "page 1" — everything below is normal document flow you scroll to */
+  #mapStage{position:relative;height:100vh;overflow:hidden;}
+
+  /* Pure-CSS parallax hero (Keith Clark technique): perspective:1px on the
+     scroll container + translateZ(-1px) scale(2) on the background layer
+     makes the background appear to scroll at a different rate than the
+     foreground content. Scoped to .MainContainer so it can't leak into the
+     rest of the page's type system or the map's fixed/absolute layers. */
+  .MainContainer{
+    perspective:1px;transform-style:preserve-3d;
+    height:100vh;overflow-x:hidden;overflow-y:scroll;
+    scroll-behavior:smooth;
+  }
+  .ParallaxContainer{
+    display:flex;justify-content:center;align-items:center;
+    position:relative;z-index:-1;height:100vh;
+    transform:translateZ(-1px) scale(2);
+    background-color:var(--green-600);
+    background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.09) 0 2px, transparent 2px 46px);
+  }
+  .MainContainer h1{
+    /* sized at half the intended on-screen size: .ParallaxContainer's scale(2) doubles it visually */
+    font-family:var(--font-display);color:#fff;text-align:center;font-weight:700;
+    font-size:clamp(24px, 7vw, 100px);line-height:1.05;
+    letter-spacing:0;margin:0;padding:0 16px;
+  }
+  .ContentContainer{position:relative;display:block;background-color:#fff;z-index:1;}
+  .Content{max-width:750px;margin:0 auto;padding:75px 24px;font-family:var(--font-sans);font-size:18px;line-height:28px;color:var(--ink);}
+  .Content p{margin:0 0 24px;}
+  .Content p:last-child{margin-bottom:0;}
+</style>
+</head>
+<body>
+
+<!-- Scroll section 1: pure-CSS parallax hero (own inner scrollbar; hands off
+     to the page scroll once its content runs out) -->
+<div class="MainContainer">
+  <div class="ParallaxContainer">
+    <h1>PAWS DC</h1>
+  </div>
+  <div class="ContentContainer">
+    <div class="Content">
+      <p>A field log for every leash-worthy park in the District — loop times, shade, water access and off-leash rules, checked before you clip the leash.</p>
+      <p>Scroll to reach the interactive 3D map below.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Scroll section 2: the interactive map -->
+<div id="mapStage">
+  <div id="tokenGate" class="token-warning">
+    <div class="box">
+      <h2>Add your Mapbox access token</h2>
+      <p>Open this file, find <code>mapboxgl.accessToken</code> near the bottom of the script, and replace <code>YOUR_MAPBOX_ACCESS_TOKEN</code> with your own public token from <b>account.mapbox.com</b>. Then reload this page.</p>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="pawCursor">🐾</div>
+
+  <nav>
+    <div class="logo">
+      <div class="logo-mark">🐾</div>
+      <div class="logo-word">PAWS DC<span>FIELD LOG · DISTRICT PARKS</span></div>
+    </div>
+    <div class="navlinks" id="navlinks"></div>
+  </nav>
+
+  <button class="reopen-btn" id="reopenBtn">☰ Show park info</button>
+  <div class="panel" id="panel"></div>
+
+  <div class="marquee"><div class="marquee-track" id="marqueeTrack"></div></div>
+</div>
+
+<script>
+const PARKS = [
+  {
+    id:"RC-01", lng:-77.045, lat:38.955, kind:"park",
+    name:"Rock Creek Park — Western Ridge Trail", category:"Forest trail",
+    tags:["wooded","stairs"],
+    loop:"~50 min", surface:"Dirt / gravel, partly paved", shade:"Very heavy (full forest)",
+    stairs:"Some grades / steps on side trails", water:"Only near the Nature Center — none on the trail",
+    waste:"Only at some trailheads — bring your own", offleash:"Not allowed (NPS rule, 6-ft leash at all times)",
+    note:"A 1,754-acre forest. Beavers, foxes and other wildlife live here — keep the leash short and close."
+  },
+  {
+    id:"GA-02", lng:-77.0777, lat:38.9435, kind:"park",
+    name:"Glover-Archbold Park", category:"Forest trail",
+    tags:["wooded"],
+    loop:"~45 min", surface:"Dirt trail, unpaved", shade:"Very heavy (dense forest path)",
+    stairs:"Some grade/steps at trailhead entrances", water:"None",
+    waste:"None — bring your own", offleash:"Not allowed (leash required)",
+    note:"A roughly 3-mile north-south forest trail. No on-site parking — park on the street near a trailhead."
+  },
+  {
+    id:"MT-03", lng:-77.0611, lat:38.9138, kind:"park",
+    name:"Montrose Park", category:"Lawn & garden",
+    tags:["offleash","shade"],
+    loop:"~30 min", surface:"Grass + paved paths", shade:"Plenty, lots of benches",
+    stairs:"Almost none (flat)", water:"None — bring your own",
+    waste:"Not stated as provided — bring your own", offleash:"Tue–Sun 2–6 PM in a designated area only, leashed otherwise",
+    note:"Connects directly into Dumbarton Oaks Park to extend the loop. Right next to the boxwood maze garden."
+  },
+  {
+    id:"GW-04", lng:-77.0625, lat:38.9034, kind:"park",
+    name:"Georgetown Waterfront Park", category:"Riverfront path",
+    tags:["paved","water"],
+    loop:"~40 min (riverside out-and-back)", surface:"Fully paved, flat", shade:"Light (mostly open riverfront)",
+    stairs:"None (fully flat)", water:"Yes (fountain on-site)",
+    waste:"Provided", offleash:"Not allowed (leash required)",
+    note:"A popular route along the Potomac — can get crowded with people and cyclists on weekend afternoons."
+  },
+  {
+    id:"MH-05", lng:-77.0367, lat:38.9210, kind:"park",
+    name:"Meridian Hill Park (Malcolm X Park)", category:"Terraced park",
+    tags:["stairs","water"],
+    loop:"~25 min", surface:"Paved + grass terrace on top", shade:"Moderate (terraces exposed, upper lawn shaded)",
+    stairs:"Many — cascading fountain stairs", water:"Yes",
+    waste:"Provided", offleash:"Not allowed (leash required)",
+    note:"Lots of stairs — small dogs or seniors may prefer sticking to the upper lawn area."
+  },
+  {
+    id:"SS-06", lng:-77.0369, lat:38.9157, kind:"turf",
+    name:"S Street Dog Park", category:"Fenced off-leash",
+    tags:["offleash","paved"],
+    loop:"~10–15 min (mostly free play)", surface:"Antimicrobial turf", shade:"Shaded benches available",
+    stairs:"None (flat)", water:"Yes (pet water fountain)",
+    waste:"Provided", offleash:"Yes — fully fenced dedicated area, 7 AM–8 PM",
+    note:"A pure off-leash play space. Pairs well with a walk through the surrounding Dupont Circle blocks."
+  },
+  {
+    id:"AR-07", lng:-76.9765, lat:38.8785, kind:"park",
+    name:"Anacostia Riverwalk Trail", category:"Riverfront path",
+    tags:["paved","water"],
+    loop:"~55 min (riverside stretch)", surface:"Fully paved", shade:"Patchy (varies a lot by section)",
+    stairs:"None (flat)", water:"Seasonal (mainly summer, may be shut off in winter)",
+    waste:"Provided on-site", offleash:"Not allowed (leash required, shared with cyclists)",
+    note:"A long paved trail along the river. Shared with cyclists — keep the leash short."
+  }
+];
+
+const FILTERS = [
+  {id:"all", label:"All parks"},
+  {id:"wooded", label:"Wooded trails"},
+  {id:"offleash", label:"Off-leash"},
+  {id:"paved", label:"Paved & flat"},
+  {id:"water", label:"Water access"}
+];
+
+// ============================================================
+// PASTE YOUR MAPBOX TOKEN BELOW
+// ============================================================
+mapboxgl.accessToken = 'pk.eyJ1IjoibjNtMG5lbTAiLCJhIjoiY211a2YwemNpMTYwZzJ6cHE1M2diand1OSJ9.WPvchZUDG3oKzVt44xxtjw';
+// ============================================================
+
+if(mapboxgl.accessToken && mapboxgl.accessToken !== 'YOUR_MAPBOX_ACCESS_TOKEN'){
+  document.getElementById('tokenGate').style.display = 'none';
+}
+
+/* marquee ticker */
+const MARQUEE_ITEMS = ["WALK","SNIFF","REPEAT","7 SPOTS LOGGED","FIELD NOTES FOR DC DOGS","LEASH UP WHERE IT COUNTS"];
+const marqueeTrack = document.getElementById('marqueeTrack');
+const marqueeHtml = MARQUEE_ITEMS.map(t=>`<span>${t}</span>`).join('');
+marqueeTrack.innerHTML = marqueeHtml + marqueeHtml;
+
+/* custom cursor + magnetic buttons (skipped on touch devices) */
+const FINE_POINTER = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+const pawCursor = document.getElementById('pawCursor');
+if(FINE_POINTER){
+  document.body.classList.add('custom-cursor-on');
+  document.addEventListener('mousemove', (e)=>{
+    pawCursor.style.left = e.clientX + 'px';
+    pawCursor.style.top = e.clientY + 'px';
+    pawCursor.classList.add('show');
+  });
+  document.addEventListener('mouseleave', ()=> pawCursor.classList.remove('show'));
+  const MAGNET_SELECTOR = '.navlink, .action-btn, .icon-btn, .reopen-btn, .park-marker';
+  document.addEventListener('mouseover', (e)=>{ if(e.target.closest(MAGNET_SELECTOR)) pawCursor.classList.add('big'); });
+  document.addEventListener('mouseout', (e)=>{ if(e.target.closest(MAGNET_SELECTOR)) pawCursor.classList.remove('big'); });
+}
+function attachMagnetic(el, strength, max){
+  strength = strength || 0.3; max = max || 9;
+  if(!FINE_POINTER) return;
+  el.addEventListener('mousemove', (e)=>{
+    const r = el.getBoundingClientRect();
+    const dx = Math.max(-max, Math.min(max, (e.clientX - (r.left + r.width/2)) * strength));
+    const dy = Math.max(-max, Math.min(max, (e.clientY - (r.top + r.height/2)) * strength));
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+  });
+  el.addEventListener('mouseleave', ()=>{ el.style.transform = ''; });
+}
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/mapbox/standard', // Standard style ships with 3D buildings + landmarks built in
+  center: [-77.03, 38.915],
+  zoom: 12.2,
+  pitch: 60,
+  bearing: -14,
+  antialias: true
+});
+
+map.addControl(new mapboxgl.NavigationControl({visualizePitch:true}), 'top-right');
+
+map.on('style.load', () => {
+  // Force a daytime light preset + make sure 3D buildings/landmarks are shown
+  try{
+    map.setConfigProperty('basemap', 'lightPreset', 'day');
+    map.setConfigProperty('basemap', 'show3dObjects', true);
+  }catch(e){ /* older mapbox-gl-js without Standard config API */ }
+
+  // 3-color basemap: black/white/green only, to match the site's palette.
+  // Mapbox's vector-tile label font can't be an arbitrary Google Font (Pixelify Sans isn't
+  // hosted by Mapbox) — Roboto Mono is the closest built-in monospace match.
+  try{
+    // PAPER = white with a 5% black overlay (255 * 0.95 ≈ 242 → #f2f2f2), so the map's
+    // "white" land/building areas read slightly muted instead of stark white.
+    const INK = '#17201b', PAPER = '#f2f2f2', GREEN = '#2a8c4a';
+    // 'monochrome' applies its own desaturation filter that mutes/ignores the
+    // colorLand / colorBuildings / colorGreenspace overrides below — 'default'
+    // lets those explicit hex overrides actually show up as pure black/white/green.
+    map.setConfigProperty('basemap', 'theme', 'default');
+    map.setConfigProperty('basemap', 'font', 'Roboto Mono');
+    map.setConfigProperty('basemap', 'colorGreenspace', GREEN);
+    map.setConfigProperty('basemap', 'colorLand', PAPER);
+    map.setConfigProperty('basemap', 'colorCommercial', PAPER);
+    map.setConfigProperty('basemap', 'colorEducation', PAPER);
+    map.setConfigProperty('basemap', 'colorMedical', PAPER);
+    map.setConfigProperty('basemap', 'colorIndustrial', PAPER);
+    map.setConfigProperty('basemap', 'colorBuildings', PAPER);
+    map.setConfigProperty('basemap', 'colorWater', INK);
+    map.setConfigProperty('basemap', 'colorMotorways', INK);
+    map.setConfigProperty('basemap', 'colorTrunks', INK);
+    map.setConfigProperty('basemap', 'colorRoads', INK);
+    map.setConfigProperty('basemap', 'colorHdRoads', INK);
+    map.setConfigProperty('basemap', 'colorAdminBoundaries', INK);
+    map.setConfigProperty('basemap', 'colorPlaceLabels', INK);
+    map.setConfigProperty('basemap', 'colorRoadLabels', INK);
+    map.setConfigProperty('basemap', 'colorPointOfInterestLabels', INK);
+  }catch(e){ /* older mapbox-gl-js without Standard color-theming config */ }
+
+  // 3D terrain: real elevation (hills/valleys), not just building extrusions
+  if(!map.getSource('mapbox-dem')){
+    map.addSource('mapbox-dem', {
+      type:'raster-dem',
+      url:'mapbox://mapbox.mapbox-terrain-dem-v1',
+      tileSize:512,
+      maxzoom:14
+    });
+  }
+  map.setTerrain({source:'mapbox-dem', exaggeration:1.5});
+
+  if(!map.getLayer('sky')){
+    map.addLayer({
+      id:'sky',
+      type:'sky',
+      paint:{
+        'sky-type':'atmosphere',
+        'sky-atmosphere-sun-intensity':10
+      }
+    });
+  }
+
+  // Mapillary street-level imagery coverage lines (ported from the pasted
+  // MapboxMaps/iOS example: VectorSource -> LineLayer, "sequence" layer).
+  // Line color set to white to read against the gray/green road+building fabric.
+  if(!map.getSource('mapillary')){
+    map.addSource('mapillary', {
+      type:'vector',
+      tiles:['https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}?access_token=MLY%7C4142433049200173%7C72206abe5035850d6743b23a49c41333'],
+      minzoom:6,
+      maxzoom:14
+    });
+  }
+  if(!map.getLayer('line-layer')){
+    map.addLayer({
+      id:'line-layer',
+      type:'line',
+      source:'mapillary',
+      'source-layer':'sequence',
+      slot:'middle',
+      layout:{ 'line-cap':'round', 'line-join':'round' },
+      paint:{
+        'line-color':'#ffffff',
+        'line-opacity':0.6,
+        'line-width':2
+      }
+    });
+  }
+});
+
+const markerRefs = {};
+PARKS.forEach(p=>{
+  const el = document.createElement('div');
+  el.className = 'park-marker' + (p.kind==='turf' ? ' turf' : '');
+  el.innerHTML = '<span>🐾</span>';
+  el.addEventListener('click', ()=> selectPark(p.id));
+  const marker = new mapboxgl.Marker({element: el, anchor:'bottom'})
+    .setLngLat([p.lng, p.lat])
+    .addTo(map);
+  markerRefs[p.id] = {marker, el};
+});
+
+/* nav filters */
+const navWrap = document.getElementById("navlinks");
+let activeFilter = "all";
+FILTERS.forEach(f=>{
+  const b = document.createElement("button");
+  b.className = "navlink" + (f.id==="all" ? " active":"");
+  b.textContent = f.label;
+  b.addEventListener("click", ()=>{
+    activeFilter = f.id;
+    document.querySelectorAll(".navlink").forEach(n=>n.classList.remove("active"));
+    b.classList.add("active");
+    applyFilter();
+  });
+  attachMagnetic(b);
+  navWrap.appendChild(b);
+});
+attachMagnetic(document.getElementById('reopenBtn'));
+function applyFilter(){
+  PARKS.forEach((p, i)=>{
+    const match = activeFilter==="all" || p.tags.includes(activeFilter);
+    const el = markerRefs[p.id].el;
+    el.style.transitionDelay = (i*30)+"ms";
+    el.style.opacity = match ? "1" : "0.2";
+    el.style.transform = match ? "rotate(-45deg) scale(1)" : "rotate(-45deg) scale(0.8)";
+  });
+}
+
+/* saved state */
+let saved = {};
+try{ saved = JSON.parse(localStorage.getItem("paws-dc-saved") || "{}"); }catch(e){ saved = {}; }
+function persistSaved(){ try{ localStorage.setItem("paws-dc-saved", JSON.stringify(saved)); }catch(e){} }
+
+const panel = document.getElementById("panel");
+const reopenBtn = document.getElementById("reopenBtn");
+let currentId = null;
+
+function renderPanel(p){
+  currentId = p.id;
+  const isSaved = !!saved[p.id];
+  const waterWarn = p.water.startsWith("None");
+  const wasteWarn = p.waste.startsWith("None");
+  const offGood = p.offleash.startsWith("Yes");
+
+  panel.innerHTML = `
+    <div class="panel-topbar"><button class="icon-btn" id="closePanel">✕</button></div>
+    <div class="unit-tag">UNIT ${p.id} / DC-PARKS-NET</div>
+    <h2>${p.name}</h2>
+    <div class="category">${p.category}</div>
+    <div class="action-row">
+      <button class="action-btn" id="btnDirections"><span class="circle">🧭</span><span class="label">Directions</span></button>
+      <button class="action-btn ${isSaved?'saved':''}" id="btnSave"><span class="circle">${isSaved?'♥':'♡'}</span><span class="label">${isSaved?'Saved':'Save'}</span></button>
+      <button class="action-btn" id="btnShare"><span class="circle">🔗</span><span class="label">Share</span></button>
+      <button class="action-btn" id="btnFly"><span class="circle">🎯</span><span class="label">Fly to</span></button>
+    </div>
+    <div class="section"><div class="section-title"><span class="ico">⏱</span> Loop time</div><p><b>${p.loop}</b> · surface: ${p.surface}</p></div>
+    <div class="section"><div class="section-title"><span class="ico">🌳</span> Shade &amp; terrain</div><p>${p.shade}. ${p.stairs}.</p></div>
+    <div class="section"><div class="section-title"><span class="ico">💧</span> Water &amp; waste bags</div><p>${p.water} · ${p.waste}</p></div>
+    <div class="section"><div class="section-title"><span class="ico">🔓</span> Off-leash rules</div><p>${p.offleash}</p></div>
+    <div class="badge-row">
+      <span class="badge ${offGood?'':'warn'}">${offGood?'Off-leash OK':'Leash required'}</span>
+      <span class="badge ${waterWarn?'warn':''}">${waterWarn?'No water — BYO':'Water on site'}</span>
+      <span class="badge ${wasteWarn?'warn':''}">${wasteWarn?'No bags — BYO':'Bags provided'}</span>
+    </div>
+    <p class="foot-note">${p.note}<br>Off-leash hours and seasonal fountain operation can change — check on-site signage.</p>
+  `;
+
+  panel.classList.remove("card-in");
+  void panel.offsetWidth; // reflow to restart the entrance animation
+  panel.classList.add("card-in");
+
+  panel.querySelectorAll(".action-btn, .icon-btn").forEach(el=> attachMagnetic(el, 0.25, 6));
+
+  panel.querySelector("#closePanel").addEventListener("click", closePanel);
+  panel.querySelector("#btnDirections").addEventListener("click", ()=>{
+    const q = encodeURIComponent(p.name.split(" — ")[0].split(" (")[0] + ", Washington, DC");
+    window.open("https://www.google.com/maps/dir/?api=1&destination="+q, "_blank", "noopener");
+  });
+  panel.querySelector("#btnSave").addEventListener("click", ()=>{
+    saved[p.id] = !saved[p.id]; persistSaved(); renderPanel(p);
+  });
+  panel.querySelector("#btnShare").addEventListener("click", async ()=>{
+    const shareText = p.name + " — dog walk loop, "+p.loop;
+    try{
+      if(navigator.share){ await navigator.share({title:p.name, text:shareText}); }
+      else if(navigator.clipboard){ await navigator.clipboard.writeText(shareText); }
+    }catch(e){}
+  });
+  panel.querySelector("#btnFly").addEventListener("click", ()=>{
+    map.flyTo({center:[p.lng,p.lat], zoom:16.5, pitch:65, bearing:-20, duration:1400});
+  });
+
+  panel.classList.remove("closed");
+  reopenBtn.classList.remove("show");
+  Object.values(markerRefs).forEach(m=>m.el.classList.remove("selected"));
+  markerRefs[p.id].el.classList.add("selected");
+}
+
+function selectPark(id){
+  const p = PARKS.find(pp=>pp.id===id);
+  if(p){
+    renderPanel(p);
+    map.flyTo({center:[p.lng,p.lat], zoom:16, pitch:60, bearing:-14, duration:1200});
+  }
+}
+function closePanel(){ panel.classList.add("closed"); reopenBtn.classList.add("show"); }
+reopenBtn.addEventListener("click", ()=>{ if(currentId) selectPark(currentId); });
+
+selectPark("RC-01");
+</script>
+</body>
+</html>
